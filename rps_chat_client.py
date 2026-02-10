@@ -1,5 +1,7 @@
 # rps_chat_client.py
 # Usage:
+# Pre-Define LLM_SERVER_URL, e.g.
+# http://127.0.0.1:8000
 # uv run rps_chat_client.py \
 #   --url $LLM_SERVER_URL \
 #   --rps 1 \
@@ -70,10 +72,30 @@ async def send_request(
             latency = time.perf_counter() - start
 
             if resp.status // 100 == 2:
-                print(f"[{idx}] status={resp.status} latency={latency:.3f}s")
+                # Try parse JSON
+                try:
+                    data = json.loads(text)
+                except Exception:
+                    print(f"[{idx}] status={resp.status} latency={latency:.3f}s (non-json) body={text[:300]!r}")
+                    return True, latency
+
+                choice0 = (data.get("choices") or [{}])[0]
+                msg = choice0.get("message") or {}
+                content = msg.get("content")
+                finish = choice0.get("finish_reason")
+                usage = data.get("usage")
+
+                content_repr = repr(content)
+
+                is_empty = (content is None) or (isinstance(content, str) and len(content) == 0)
+                if is_empty:
+                    print(f"[{idx}] status=200 latency={latency:.3f}s EMPTY content={content_repr} finish={finish} usage={usage} msg={msg}")
+                    print(f"[{idx}] raw={text[:800]}{' ...<truncated>' if len(text) > 800 else ''}")
+                else:
+                    print(f"[{idx}] status=200 latency={latency:.3f}s answer={content[:60]!r}")
+
                 return True, latency
             else:
-                # Print server's error body (SUPER important for debugging 500)
                 preview = text if len(text) <= 800 else text[:800] + " ...<truncated>"
                 print(f"[{idx}] status={resp.status} latency={latency:.3f}s body={preview}")
                 return False, latency
