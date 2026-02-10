@@ -1,51 +1,89 @@
-# =====================
-# Usage
-# python rps_chat_client.py \
-#   --url http://127.0.0.1:8000 \
-#   --rps 20 \
-#   --duration 120 \
-#   --max-requests 1000 \
-#   --model facebook/opt-1.3b \
+# rps_chat_client.py
+# Usage:
+# uv run rps_chat_client.py \
+#   --url $LLM_SERVER_URL \
+#   --rps 1 \
+#   --duration 10 \
+#   --max-requests 20 \
+#   --model Llama-2-7b-hf \
+#   --model-prefix /models \
 #   --prompt "What is your name?"
-# =====================
 
 import asyncio
 import aiohttp
 import argparse
 import time
-from typing import Dict, Any, Optional
+import json
+from typing import Dict, Any, Optional, Tuple
 
 
-# =====================
-# Request
-# =====================
+def normalize_model(model: str, prefix: Optional[str]) -> str:
+    """
+    Normalize model name to match servers that expect '/models/<name>'.
+    If model is already absolute-like (starts with '/' or contains prefix), keep it.
+    """
+    if not prefix:
+        return model
+    if model.startswith("/"):
+        return model
+    # common: prefix="/models" -> "/models/<model>"
+    prefix = prefix.rstrip("/")
+    return f"{prefix}/{model}"
+
+
+async def fetch_models(session: aiohttp.ClientSession, base_url: str, timeout: int) -> Optional[list]:
+    try:
+        async with session.get(
+            f"{base_url}/v1/models",
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as resp:
+            txt = await resp.text()
+            if resp.status // 100 != 2:
+                print(f"[models] status={resp.status} body={txt[:500]}")
+                return None
+            data = json.loads(txt)
+            # OpenAI format: {"data":[{"id":"..."}]}
+            if isinstance(data, dict) and "data" in data and isinstance(data["data"], list):
+                return [m.get("id") for m in data["data"] if isinstance(m, dict)]
+            return None
+    except Exception as e:
+        print(f"[models] ERROR: {e}")
+        return None
+
+
 async def send_request(
     session: aiohttp.ClientSession,
     url: str,
     payload: Dict[str, Any],
     idx: int,
     timeout: int,
-):
+) -> Tuple[bool, float]:
     start = time.perf_counter()
     try:
         async with session.post(
             f"{url}/v1/chat/completions",
             json=payload,
+            headers={"Content-Type": "application/json"},
             timeout=aiohttp.ClientTimeout(total=timeout),
         ) as resp:
-            await resp.read()  # consume body (non-stream)
+            text = await resp.text()
             latency = time.perf_counter() - start
-            print(f"[{idx}] status={resp.status} latency={latency:.3f}s")
-            return True, latency
+
+            if resp.status // 100 == 2:
+                print(f"[{idx}] status={resp.status} latency={latency:.3f}s")
+                return True, latency
+            else:
+                # Print server's error body (SUPER important for debugging 500)
+                preview = text if len(text) <= 800 else text[:800] + " ...<truncated>"
+                print(f"[{idx}] status={resp.status} latency={latency:.3f}s body={preview}")
+                return False, latency
+
     except Exception as e:
         latency = time.perf_counter() - start
         print(f"[{idx}] ERROR after {latency:.3f}s: {e}")
         return False, latency
 
 
-# =====================
-# Runner
-# =====================
 async def run(args):
     if args.rps <= 0:
         raise ValueError("--rps must be > 0")
@@ -54,21 +92,43 @@ async def run(args):
     start_t = time.perf_counter()
     end_t = start_t + args.duration
 
-    payload = {
-        "model": args.model,
+    model = normalize_model(args.model, args.model_prefix)
+
+    payload: Dict[str, Any] = {
+        "model": model,
         "messages": [
             {"role": "system", "content": args.system_prompt},
             {"role": "user", "content": args.prompt},
         ],
+        # Make behavior explicit (many servers are picky)
+        "stream": False,
     }
+
+    # Optional generation params
+    if args.max_tokens is not None:
+        payload["max_tokens"] = args.max_tokens
+    if args.temperature is not None:
+        payload["temperature"] = args.temperature
+    if args.top_p is not None:
+        payload["top_p"] = args.top_p
 
     connector = aiohttp.TCPConnector(limit=0)
     async with aiohttp.ClientSession(connector=connector) as session:
+        # Optional: verify the model exists on server
+        if args.verify_model:
+            ids = await fetch_models(session, args.url, args.timeout)
+            if ids is not None:
+                ok = model in ids
+                print(f"[verify] model={model} exists={ok}")
+                if not ok:
+                    # also show a few candidates
+                    sample = ids[:20]
+                    print(f"[verify] server models (first {len(sample)}): {sample}")
+
         tasks = []
         idx = 0
-
-        # Stop condition: time OR max_requests
         max_requests: Optional[int] = args.max_requests
+
         while True:
             now = time.perf_counter()
             if now >= end_t:
@@ -78,13 +138,7 @@ async def run(args):
 
             tasks.append(
                 asyncio.create_task(
-                    send_request(
-                        session,
-                        args.url,
-                        payload,
-                        idx,
-                        args.timeout,
-                    )
+                    send_request(session, args.url, payload, idx, args.timeout)
                 )
             )
             idx += 1
@@ -94,75 +148,56 @@ async def run(args):
 
     success = sum(1 for ok, _ in results if ok)
     total = len(results)
-    avg_latency = sum(lat for _, lat in results) / total if total else 0
+    avg_latency = sum(lat for _, lat in results) / total if total else 0.0
 
     print("\n===== SUMMARY =====")
+    print(f"Model          : {model}")
     print(f"Total requests : {total}")
     print(f"Success        : {success}")
     print(f"Failure        : {total - success}")
     print(f"Avg latency    : {avg_latency:.3f}s")
 
 
-# =====================
-# CLI
-# =====================
 def parse_args():
     parser = argparse.ArgumentParser(
         description="RPS-controlled OpenAI-compatible LLM client"
     )
+    parser.add_argument("--url", type=str, required=True,
+                        help="Base URL of the LLM server (e.g. http://127.0.0.1:8000)")
+    parser.add_argument("--rps", type=float, default=5,
+                        help="Requests per second (must be > 0)")
+    parser.add_argument("--duration", type=int, default=60,
+                        help="Total duration in seconds")
+    parser.add_argument("--max-requests", type=int, default=None,
+                        help="Maximum number of requests to send (default: unlimited)")
+    parser.add_argument("--model", type=str, default="Llama-2-7b-hf",
+                        help="Model name or full id. E.g. 'Llama-2-7b-hf' or '/models/Llama-2-7b-hf'")
+    parser.add_argument("--model-prefix", type=str, default="/models",
+                        help="If set, will normalize model to '<prefix>/<model>' when model doesn't start with '/'. "
+                             "Set to '' to disable.")
+    parser.add_argument("--prompt", type=str, default="What is your name?",
+                        help="User prompt")
+    parser.add_argument("--system-prompt", type=str, default="You are a helpful assistant.",
+                        help="System prompt")
+    parser.add_argument("--timeout", type=int, default=30,
+                        help="Request timeout (seconds)")
 
-    parser.add_argument(
-        "--url",
-        type=str,
-        required=True,
-        help="Base URL of the LLM server (e.g. http://127.0.0.1:8000)",
-    )
-    parser.add_argument(
-        "--rps",
-        type=float,
-        default=5,
-        help="Requests per second (must be > 0)",
-    )
-    parser.add_argument(
-        "--duration",
-        type=int,
-        default=60,
-        help="Total duration in seconds",
-    )
-    parser.add_argument(
-        "--max-requests",
-        type=int,
-        default=None,
-        help="Maximum number of requests to send (default: unlimited)",
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="facebook/opt-1.3b",
-        help="Model name",
-    )
-    parser.add_argument(
-        "--prompt",
-        type=str,
-        default="What is your name?",
-        help="User prompt",
-    )
-    parser.add_argument(
-        "--system-prompt",
-        type=str,
-        default="You are a helpful assistant.",
-        help="System prompt",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=int,
-        default=30,
-        help="Request timeout (seconds)",
-    )
+    # Optional generation controls
+    parser.add_argument("--max-tokens", type=int, default=None,
+                        help="max_tokens for completion")
+    parser.add_argument("--temperature", type=float, default=None,
+                        help="temperature")
+    parser.add_argument("--top-p", type=float, default=None,
+                        help="top_p")
+
+    parser.add_argument("--verify-model", action="store_true",
+                        help="Call GET /v1/models once and check whether the provided model exists.")
 
     args = parser.parse_args()
     if args.max_requests is not None and args.max_requests <= 0:
         raise ValueError("--max-requests must be a positive integer, or omit it")
+    if args.model_prefix == "":
+        args.model_prefix = None
     return args
 
 

@@ -91,7 +91,13 @@ python rps_chat_client.py \
   --url http://127.0.0.1:8000 \
   --rps 20 \
   --duration 30 \
-  --max-requests 1000
+  --max-requests 1000 \
+  --model Llama-2-7b-hf \
+  --model-prefix /models \
+  --verify-model \
+  --max-tokens 128 \
+  --temperature 0.7 \
+  --top-p 0.9
 ```
 
 What it does:
@@ -103,6 +109,11 @@ What it intentionally does NOT do:
 - no per-second monitoring
 - no throughput curve
 - no steady-state detection
+
+Model behavior notes:
+- `--model-prefix` defaults to `/models`, so `--model Llama-2-7b-hf` is normalized to `/models/Llama-2-7b-hf`
+- set `--model-prefix ''` to disable normalization
+- `--verify-model` checks `/v1/models` once before load generation
 
 ---
 
@@ -124,6 +135,12 @@ python rps_throughput_monitor.py \
   --rps 20 \
   --duration 30 \
   --max-requests 1000 \
+  --model Llama-2-7b-hf \
+  --model-prefix /models \
+  --verify-model \
+  --max-tokens 128 \
+  --temperature 0.7 \
+  --top-p 0.9 \
   --csv throughput.csv
 ```
 
@@ -236,4 +253,3 @@ Natural next steps if you continue this work:
 - Poisson / burst arrival models
 - automatic steady-state detection
 - plotting scripts (matplotlib)
-

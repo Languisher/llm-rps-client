@@ -6,6 +6,9 @@
 #     --rps 20 \
 #     --duration 30 \
 #     --max-requests 1000 \
+#     --model Llama-2-7b-hf \
+#     --model-prefix /models \
+#     --verify-model \
 #     --csv outputs/throughput.csv
 #
 # Notes:
@@ -113,13 +116,22 @@ async def _run_with_monitor(args):
     start_t = time.perf_counter()
     end_t = start_t + args.duration
 
+    model = rps_chat_client.normalize_model(args.model, args.model_prefix)
+
     payload: Dict[str, Any] = {
-        "model": args.model,
+        "model": model,
         "messages": [
             {"role": "system", "content": args.system_prompt},
             {"role": "user", "content": args.prompt},
         ],
+        "stream": False,
     }
+    if args.max_tokens is not None:
+        payload["max_tokens"] = args.max_tokens
+    if args.temperature is not None:
+        payload["temperature"] = args.temperature
+    if args.top_p is not None:
+        payload["top_p"] = args.top_p
 
     counters = {"sent": 0, "done": 0, "ok": 0, "err": 0}
     latency_q: asyncio.Queue[float] = asyncio.Queue()
@@ -131,6 +143,15 @@ async def _run_with_monitor(args):
 
     connector = aiohttp.TCPConnector(limit=0)
     async with aiohttp.ClientSession(connector=connector) as session:
+        if args.verify_model:
+            ids = await rps_chat_client.fetch_models(session, args.url, args.timeout)
+            if ids is not None:
+                ok = model in ids
+                print(f"[verify] model={model} exists={ok}")
+                if not ok:
+                    sample = ids[:20]
+                    print(f"[verify] server models (first {len(sample)}): {sample}")
+
         tasks: List[asyncio.Task] = []
         idx = 0
 
@@ -181,6 +202,7 @@ async def _run_with_monitor(args):
     await monitor_task
 
     print("\n===== FINAL =====")
+    print(f"Model          : {model}")
     print(f"Sent           : {counters['sent']}")
     print(f"Done           : {counters['done']}")
     print(f"OK             : {counters['ok']}")
@@ -196,15 +218,31 @@ def parse_args():
     p.add_argument("--rps", type=float, default=5)
     p.add_argument("--duration", type=int, default=60)
     p.add_argument("--max-requests", type=int, default=None)
-    p.add_argument("--model", type=str, default="facebook/opt-1.3b")
+    p.add_argument("--model", type=str, default="Llama-2-7b-hf")
+    p.add_argument(
+        "--model-prefix",
+        type=str,
+        default="/models",
+        help="If set, normalize model to '<prefix>/<model>' when model doesn't start with '/'. Set to '' to disable.",
+    )
     p.add_argument("--prompt", type=str, default="What is your name?")
     p.add_argument("--system-prompt", type=str, default="You are a helpful assistant.")
     p.add_argument("--timeout", type=int, default=30)
+    p.add_argument("--max-tokens", type=int, default=None,
+                   help="max_tokens for completion")
+    p.add_argument("--temperature", type=float, default=None,
+                   help="temperature")
+    p.add_argument("--top-p", type=float, default=None,
+                   help="top_p")
+    p.add_argument("--verify-model", action="store_true",
+                   help="Call GET /v1/models once and check whether the provided model exists.")
     p.add_argument("--csv", type=str, default="throughput.csv",
                    help="CSV output path (empty to disable)")
     args = p.parse_args()
     if args.csv == "":
         args.csv = None
+    if args.model_prefix == "":
+        args.model_prefix = None
     if args.max_requests is not None and args.max_requests <= 0:
         raise ValueError("--max-requests must be positive")
     return args
