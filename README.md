@@ -12,12 +12,14 @@ This repo is designed for **systems experiments**, not model evaluation:
 
 ## Repository Structure
 
+```
 .
 ├── rps_chat_client.py          # Core RPS-controlled client (DO NOT modify)
 ├── rps_throughput_monitor.py   # Throughput / latency monitor (wrapper)
 ├── tests/
 │   └── mock_server.py          # Mock OpenAI-compatible server
 └── README.md
+```
 
 Design principle:
 
@@ -31,12 +33,16 @@ This repo assumes you are using **`uv`** for Python environment management.
 
 ### 1. Create virtual environment
 
+```
 uv venv  
 source .venv/bin/activate
+```
 
 ### 2. Install dependencies
 
+```
 uv pip install aiohttp fastapi uvicorn
+```
 
 (Only minimal runtime dependencies are required.)
 
@@ -49,11 +55,15 @@ against a **mock server** with fixed latency.
 
 ### Start mock server
 
+```
 python tests/mock_server.py --port 8000 --base-delay 0.1
+```
 
 This starts an OpenAI-compatible endpoint:
 
+```
 POST /v1/chat/completions
+```
 
 Behavior:
 - fixed ~100ms response time
@@ -76,11 +86,13 @@ You should treat this file as a *library*, not an experiment script.
 
 ### Example usage
 
+```
 python rps_chat_client.py \
   --url http://127.0.0.1:8000 \
   --rps 20 \
   --duration 30 \
   --max-requests 1000
+```
 
 What it does:
 - sends requests at a fixed arrival rate
@@ -106,12 +118,14 @@ It reuses `send_request()` from `rps_chat_client.py` and adds:
 
 ### Example usage
 
+```
 python rps_throughput_monitor.py \
   --url http://127.0.0.1:8000 \
   --rps 20 \
   --duration 30 \
   --max-requests 1000 \
   --csv throughput.csv
+```
 
 ---
 
@@ -119,11 +133,13 @@ python rps_throughput_monitor.py \
 
 Each CSV row corresponds to **one second**:
 
+```
 t_sec,  
 sent_total, done_total, ok_total, err_total,  
 sent_rps, done_rps,  
 inflight,  
 avg_latency, p50_latency, p95_latency
+```
 
 Key definitions:
 
@@ -166,10 +182,12 @@ throughput ≈ mean(done_rps over steady-state window)
 
 Example (from real output):
 
+```
 t=27: sent_rps=20, done_rps=19, inflight=3  
 t=28: sent_rps=19, done_rps=20, inflight=2  
 t=29: sent_rps=20, done_rps=20, inflight=2  
 t=30: sent_rps=19, done_rps=20, inflight=1  
+```
 
 → Throughput ≈ 20 requests/sec
 
@@ -219,11 +237,3 @@ Natural next steps if you continue this work:
 - automatic steady-state detection
 - plotting scripts (matplotlib)
 
----
-
-## Philosophy
-
-> Throughput is not how fast you send.  
-> It is how fast the system can sustainably finish.
-
-This tool is built to make that distinction explicit.
