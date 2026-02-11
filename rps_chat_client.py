@@ -64,6 +64,7 @@ async def send_request(
     payload: Dict[str, Any],
     idx: int,
     timeout: int,
+    debug: bool = False,
 ) -> Tuple[bool, float]:
     start = time.perf_counter()
     try:
@@ -81,7 +82,8 @@ async def send_request(
                 try:
                     data = json.loads(text)
                 except Exception:
-                    print(f"[{idx}] status={resp.status} latency={latency:.3f}s (non-json) body={text[:300]!r}")
+                    if debug:
+                        print(f"[{idx}] status={resp.status} latency={latency:.3f}s (non-json) body={text[:300]!r}")
                     return True, latency
 
                 choice0 = (data.get("choices") or [{}])[0]
@@ -93,21 +95,24 @@ async def send_request(
                 content_repr = repr(content)
 
                 is_empty = (content is None) or (isinstance(content, str) and len(content) == 0)
-                if is_empty:
-                    print(f"[{idx}] status=200 latency={latency:.3f}s EMPTY content={content_repr} finish={finish} usage={usage} msg={msg}")
-                    print(f"[{idx}] raw={text[:800]}{' ...<truncated>' if len(text) > 800 else ''}")
-                else:
-                    print(f"[{idx}] status=200 latency={latency:.3f}s answer={content[:60]!r}")
+                if debug:
+                    if is_empty:
+                        print(f"[{idx}] status=200 latency={latency:.3f}s EMPTY content={content_repr} finish={finish} usage={usage} msg={msg}")
+                    else:
+                        print(f"[{idx}] status=200 latency={latency:.3f}s answer={content[:60]!r}")
+                    print(f"[{idx}] response={text}")
 
                 return True, latency
             else:
-                preview = text if len(text) <= 800 else text[:800] + " ...<truncated>"
-                print(f"[{idx}] status={resp.status} latency={latency:.3f}s body={preview}")
+                if debug:
+                    preview = text if len(text) <= 800 else text[:800] + " ...<truncated>"
+                    print(f"[{idx}] status={resp.status} latency={latency:.3f}s body={preview}")
                 return False, latency
 
     except Exception as e:
         latency = time.perf_counter() - start
-        print(f"[{idx}] ERROR after {latency:.3f}s: {e}")
+        if debug:
+            print(f"[{idx}] ERROR after {latency:.3f}s: {e}")
         return False, latency
 
 
@@ -165,7 +170,7 @@ async def run(args):
 
             tasks.append(
                 asyncio.create_task(
-                    send_request(session, args.url, payload, idx, args.timeout)
+                    send_request(session, args.url, payload, idx, args.timeout, args.debug)
                 )
             )
             idx += 1
@@ -221,6 +226,8 @@ def parse_args():
 
     parser.add_argument("--verify-model", action="store_true",
                         help="Call GET /v1/models once and check whether the provided model exists.")
+    parser.add_argument("--debug", action="store_true",
+                        help="Enable per-request debug logs: status/latency/answer/full response")
 
     args = parser.parse_args()
     if args.max_requests is not None and args.max_requests <= 0:

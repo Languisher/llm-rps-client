@@ -187,6 +187,7 @@ async def _run_with_monitor(args):
                     payload=payload,
                     idx=idx,
                     timeout=args.timeout,
+                    debug=args.debug,
                 )
             )
             t.add_done_callback(_on_done)
@@ -239,6 +240,8 @@ def parse_args():
                    help="top_p")
     p.add_argument("--verify-model", action="store_true",
                    help="Call GET /v1/models once and check whether the provided model exists.")
+    p.add_argument("--debug", action="store_true",
+                   help="Enable per-request debug logs from rps_chat_client.send_request")
     p.add_argument("--csv", type=str, default="throughput.csv",
                    help="CSV output path (empty to disable)")
     args = p.parse_args()

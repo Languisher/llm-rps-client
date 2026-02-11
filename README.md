@@ -96,6 +96,7 @@ python rps_chat_client.py \
   --model-prefix /models \
   --verify-model \
   --repeat 3 \
+  --debug \
   --max-tokens 128 \
   --temperature 0.7 \
   --top-p 0.9
@@ -116,6 +117,8 @@ Model behavior notes:
 - set `--model-prefix ''` to disable normalization
 - `--verify-model` checks `/v1/models` once before load generation
 - `--repeat` repeats `--prompt` content in `messages[role=user].content` (e.g., `--prompt "Hi"` + `--repeat 3` -> `HiHiHi`)
+- default mode does not print per-request `status/latency/answer/response`
+- `--debug` enables per-request logs, including full response JSON body
 
 ---
 
@@ -141,6 +144,7 @@ python rps_throughput_monitor.py \
   --model-prefix /models \
   --verify-model \
   --repeat 3 \
+  --debug \
   --max-tokens 128 \
   --temperature 0.7 \
   --top-p 0.9 \
