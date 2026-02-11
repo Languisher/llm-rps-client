@@ -95,6 +95,7 @@ python rps_chat_client.py \
   --model Llama-2-7b-hf \
   --model-prefix /models \
   --verify-model \
+  --repeat 3 \
   --max-tokens 128 \
   --temperature 0.7 \
   --top-p 0.9
@@ -114,6 +115,7 @@ Model behavior notes:
 - `--model-prefix` defaults to `/models`, so `--model Llama-2-7b-hf` is normalized to `/models/Llama-2-7b-hf`
 - set `--model-prefix ''` to disable normalization
 - `--verify-model` checks `/v1/models` once before load generation
+- `--repeat` repeats `--prompt` content in `messages[role=user].content` (e.g., `--prompt "Hi"` + `--repeat 3` -> `HiHiHi`)
 
 ---
 
@@ -138,6 +140,7 @@ python rps_throughput_monitor.py \
   --model Llama-2-7b-hf \
   --model-prefix /models \
   --verify-model \
+  --repeat 3 \
   --max-tokens 128 \
   --temperature 0.7 \
   --top-p 0.9 \

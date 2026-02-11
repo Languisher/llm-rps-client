@@ -9,7 +9,8 @@
 #   --max-requests 20 \
 #   --model Llama-2-7b-hf \
 #   --model-prefix /models \
-#   --prompt "What is your name?"
+#   --prompt "What is your name?" \
+#   --repeat 3
 
 import asyncio
 import aiohttp
@@ -31,6 +32,10 @@ def normalize_model(model: str, prefix: Optional[str]) -> str:
     # common: prefix="/models" -> "/models/<model>"
     prefix = prefix.rstrip("/")
     return f"{prefix}/{model}"
+
+
+def build_user_prompt(prompt: str, repeat: int) -> str:
+    return prompt * repeat
 
 
 async def fetch_models(session: aiohttp.ClientSession, base_url: str, timeout: int) -> Optional[list]:
@@ -120,7 +125,7 @@ async def run(args):
         "model": model,
         "messages": [
             {"role": "system", "content": args.system_prompt},
-            {"role": "user", "content": args.prompt},
+            {"role": "user", "content": build_user_prompt(args.prompt, args.repeat)},
         ],
         # Make behavior explicit (many servers are picky)
         "stream": False,
@@ -199,6 +204,8 @@ def parse_args():
                              "Set to '' to disable.")
     parser.add_argument("--prompt", type=str, default="What is your name?",
                         help="User prompt")
+    parser.add_argument("--repeat", type=int, default=1,
+                        help="Repeat count for user prompt content in the request body")
     parser.add_argument("--system-prompt", type=str, default="You are a helpful assistant.",
                         help="System prompt")
     parser.add_argument("--timeout", type=int, default=30,
@@ -218,6 +225,8 @@ def parse_args():
     args = parser.parse_args()
     if args.max_requests is not None and args.max_requests <= 0:
         raise ValueError("--max-requests must be a positive integer, or omit it")
+    if args.repeat <= 0:
+        raise ValueError("--repeat must be a positive integer")
     if args.model_prefix == "":
         args.model_prefix = None
     return args

@@ -9,6 +9,7 @@
 #     --model Llama-2-7b-hf \
 #     --model-prefix /models \
 #     --verify-model \
+#     --repeat 3 \
 #     --csv outputs/throughput.csv
 #
 # Notes:
@@ -122,7 +123,7 @@ async def _run_with_monitor(args):
         "model": model,
         "messages": [
             {"role": "system", "content": args.system_prompt},
-            {"role": "user", "content": args.prompt},
+            {"role": "user", "content": rps_chat_client.build_user_prompt(args.prompt, args.repeat)},
         ],
         "stream": False,
     }
@@ -226,6 +227,8 @@ def parse_args():
         help="If set, normalize model to '<prefix>/<model>' when model doesn't start with '/'. Set to '' to disable.",
     )
     p.add_argument("--prompt", type=str, default="What is your name?")
+    p.add_argument("--repeat", type=int, default=1,
+                   help="Repeat count for user prompt content in the request body")
     p.add_argument("--system-prompt", type=str, default="You are a helpful assistant.")
     p.add_argument("--timeout", type=int, default=30)
     p.add_argument("--max-tokens", type=int, default=None,
@@ -243,6 +246,8 @@ def parse_args():
         args.csv = None
     if args.model_prefix == "":
         args.model_prefix = None
+    if args.repeat <= 0:
+        raise ValueError("--repeat must be a positive integer")
     if args.max_requests is not None and args.max_requests <= 0:
         raise ValueError("--max-requests must be positive")
     return args
